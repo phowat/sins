@@ -157,7 +157,7 @@ class StatsHandler(tornado.web.RequestHandler):
 
 if __name__ == '__main__':
     application=tornado.web.Application([
-        (r'/ws',SinsHandler),
+        (r'/sins',SinsHandler),
         (r'/stats',StatsHandler),
     ])
     application.listen(5000)
