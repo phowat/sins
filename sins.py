@@ -10,6 +10,7 @@ from itertools import cycle
 
 sessions = {}
 queues = {}
+pairs = {}
 
 class SSession(object):
     def __init__(self, write_message):
@@ -24,6 +25,16 @@ class SQueue(object):
         self.current = None
         self.cycle = None
 
+class SPairSide(object):
+    def __init__(self):
+        self.key = None
+        self.messages = Queue.Queue()
+
+class SPair(object):
+    def __init__(self):
+        self.a_side = SPairSide()
+        self.b_side = SPairSide()
+        
 class SinsHandler(WebSocketHandler):
 
     def __get_request_key(self):
@@ -66,6 +77,22 @@ class SinsHandler(WebSocketHandler):
                     except Queue.Empty:
                         break
                     self.write_message(msg)
+        elif dest_type == 'pair':
+            try:
+                pair = pairs[dest_name]
+                side = "a"
+            except:
+                pairs[dest_name] = SPair()
+                pair = pairs[dest_name]
+                side = "b"
+
+            if side == "a":
+                pair.a_side.key = self.key
+            elif pair.b_side.key is None:
+                pair.b_side.key = self.key
+            else:
+                print "Connection already paired."
+                # TODO: Inform failure to client.
         else:
             print "Unknown destination type "+dest_type +"."
 
@@ -94,6 +121,26 @@ class SinsHandler(WebSocketHandler):
                 while cur_listener != queue.cycle.next():
                     continue
 
+        elif dest_type == 'pair':
+            try:
+                pair = pairs[dest_name]
+            except:
+                print "Unknown destination "+dest_name+"."
+                return
+
+            #TODO: Refactor
+            if pair.a_side.key == self.key:
+                sessions[pair.b_side.key].write_message(
+                    json.dumps({"command": "DISCONNECT"}))
+            elif pair.a_side.key == self.key:
+                sessions[pair.a_side.key].write_message(
+                    json.dumps({"command": "DISCONNECT"}))
+            else:
+                print "Unsubscribe from party not subscribed."
+                return
+
+            del(pairs[dest_name])
+
         else:
             print "Unknown destination type "+dest_type +"."
 
@@ -113,6 +160,19 @@ class SinsHandler(WebSocketHandler):
                 queue.current = current
             else:
                 queue.messages.put_nowait(content)
+
+        elif dest_type == 'pair':
+            #TODO: Refactor
+            #TODO: Pairs should support receiveing messages while the other
+            # side hasn't connected
+
+            if pair.a_side.key == self.key:
+                sessions[pair.b_side.key].write_message(content)
+            elif pair.a_side.key == self.key:
+                sessions[pair.a_side.key].write_message(content)
+            else:
+                print "Message from endpoint not in this pair."
+                return
 
 
     def on_message(self, message):
