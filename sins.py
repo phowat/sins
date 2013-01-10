@@ -53,6 +53,28 @@ class SinsHandler(WebSocketHandler):
         print "Opening connection %s" % (self.key)
         sessions[self.key] = SSession(self.write_message)
 
+    def on_close(self):
+        #TODO: Maybe we need to clean up queues here also, test this.
+        #TODO: Refactor
+
+        #TODO: This could be optimized. Maybe I could track in the session if
+        # it is part of a pair.
+        p_key = None
+        for key in pairs:
+            if pairs[key].a_side.key == self.key:
+                p_key = key
+                side = pairs[key].b_side
+                break
+            elif pairs[key].b_side.key == self.key:
+                p_key = key
+                side = pairs[key].a_side
+                break
+                
+        if p_key is not None:
+            sessions[side.key].write_message(
+                json.dumps({"command": "DISCONNECT"}))
+            del(pairs[p_key])
+
     def __on_subscribe(self, dest_type, dest_name):
         if dest_type == 'topic':
             session = sessions[self.key]
