@@ -87,12 +87,20 @@ class SinsHandler(WebSocketHandler):
                 side = "b"
 
             if side == "a":
-                pair.a_side.key = self.key
+                side = pair.a_side
             elif pair.b_side.key is None:
-                pair.b_side.key = self.key
+                side = pair.b_side
             else:
                 print "Connection already paired."
                 # TODO: Inform failure to client.
+            side.key = self.key
+            if not side.messages.empty():
+               while True:
+                    try:
+                        msg = side.messages.get_nowait()
+                    except Queue.Empty:
+                        break
+                    self.write_message(msg)
         else:
             print "Unknown destination type "+dest_type +"."
 
@@ -122,13 +130,13 @@ class SinsHandler(WebSocketHandler):
                     continue
 
         elif dest_type == 'pair':
+            #TODO: Refactor
             try:
                 pair = pairs[dest_name]
             except:
                 print "Unknown destination "+dest_name+"."
                 return
 
-            #TODO: Refactor
             if pair.a_side.key == self.key:
                 sessions[pair.b_side.key].write_message(
                     json.dumps({"command": "DISCONNECT"}))
@@ -166,14 +174,25 @@ class SinsHandler(WebSocketHandler):
             #TODO: Pairs should support receiveing messages while the other
             # side hasn't connected
 
+            try:
+                pair = pairs[dest_name]
+            except:
+                print "Unknown destination "+dest_name+"."
+                return
+
             if pair.a_side.key == self.key:
-                sessions[pair.b_side.key].write_message(content)
-            elif pair.a_side.key == self.key:
-                sessions[pair.a_side.key].write_message(content)
+                side = pair.b_side
+            elif pair.b_side.key == self.key:
+                side = pair.a_side
             else:
                 print "Message from endpoint not in this pair."
                 return
 
+            if side.key is not None:
+                sessions[side.key].write_message(content)
+            else:
+                side.messages.put_nowait(content)
+                
 
     def on_message(self, message):
         info = None
