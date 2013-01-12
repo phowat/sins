@@ -4,9 +4,10 @@ import tornado.web
 from tornado.websocket import WebSocketHandler
 from tornado.ioloop import IOLoop
 import Queue
-from threading import Thread
 import json
 from itertools import cycle
+import base64
+from passlib.apps import custom_app_context as sins_context
 
 sessions = {}
 queues = {}
@@ -242,17 +243,47 @@ class SinsHandler(WebSocketHandler):
         else:
             print "Unknown command "+str(command)
 
+# Auth code "stolen" from: http://kelleyk.com/post/7362319243/easy-basic-http-authentication-with-tornado
+def require_basic_auth(handler_class):
+    def wrap_execute(handler_execute):
+        def require_basic_auth(handler, kwargs):
+            auth_header = handler.request.headers.get('Authorization')
+            if auth_header is None or not auth_header.startswith('Basic '):
+                handler.set_status(401)
+                handler.set_header('WWW-Authenticate', 'Basic realm=Restricted')
+                handler._transforms = []
+                handler.finish()
+                return False
+            auth_decoded = base64.decodestring(auth_header[6:])
+            kwargs['basicauth_user'], kwargs['basicauth_pass'] = auth_decoded.split(':', 2)
+            return True
+        def _execute(self, transforms, *args, **kwargs):
+            if not require_basic_auth(self, kwargs):
+                return False
+            return handler_execute(self, transforms, *args, **kwargs)
+        return _execute
+
+    handler_class._execute = wrap_execute(handler_class._execute)
+    return handler_class
+
+@require_basic_auth
 class StatsHandler(tornado.web.RequestHandler):
-    def get(self):
-        stats = 'STATS:<br>'
+    def get(self, basicauth_user, basicauth_pass):
+        # This test hash is "frenchfries"
+        test_hash = '$6$rounds=62763$MOB6eBAyRaFtrm0c$ETahVNQQujp2G0r2KrNYf4PNpI8/PcERpv/1w7evuCZC8n8OzBgCy6XVvjVxnUVNZlasdYMW3CShD/P4hBX.T/'
 
-        for qname in queues:
-            stats += "Queue: %s <br> Current: %s <br> Listeners: %s<br>" % \
-                     (qname, queues[qname].current, str(queues[qname].listeners))
+        if sins_context.verify(basicauth_pass, test_hash):
+            stats = 'STATS:<br>'
 
-        for sname in sessions:
-            stats += "Session id: %s <br> Topics: %s <br>" %\
-                     (sname, str(sessions[sname].topics))
+            for qname in queues:
+                stats += "Queue: %s <br> Current: %s <br> Listeners: %s<br>" % \
+                         (qname, queues[qname].current, str(queues[qname].listeners))
+
+            for sname in sessions:
+                stats += "Session id: %s <br> Topics: %s <br>" %\
+                         (sname, str(sessions[sname].topics))
+        else:
+            stats = "You didn't write the correct password, which is 'frenchfries' by the way."
 
         self.write(stats)
 
