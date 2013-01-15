@@ -16,15 +16,22 @@ pairs = {}
 class SSession(object):
     def __init__(self, write_message):
         self.topics = []
-        self.write_message = write_message
+        self.__write_message = write_message
         print "Created Session."
+    def write_message(self, destination, content):
+        message = {
+            'destination': destination,
+            'content': content,
+        }
+        self.__write_message(json.dumps(message))
 
 class SQueue(object):
-    def __init__(self):
+    def __init__(self, name):
         self.listeners = []
         self.messages = Queue.Queue()
         self.current = None
         self.cycle = None
+        self.name = name
 
 class SPairSide(object):
     def __init__(self):
@@ -32,9 +39,10 @@ class SPairSide(object):
         self.messages = Queue.Queue()
 
 class SPair(object):
-    def __init__(self):
+    def __init__(self, name):
         self.a_side = SPairSide()
         self.b_side = SPairSide()
+        self.name = name
         
 class SinsHandler(WebSocketHandler):
 
@@ -45,7 +53,7 @@ class SinsHandler(WebSocketHandler):
         try:
             queue = queues[name]
         except:
-            queues[name] = SQueue()
+            queues[name] = SQueue(name)
             queue = queues[name]
         return queue
 
@@ -65,15 +73,17 @@ class SinsHandler(WebSocketHandler):
             if pairs[key].a_side.key == self.key:
                 p_key = key
                 side = pairs[key].b_side
+                name = pairs[key].name
                 break
             elif pairs[key].b_side.key == self.key:
                 p_key = key
                 side = pairs[key].a_side
+                name = pairs[key].name
                 break
                 
         if p_key is not None:
             sessions[side.key].write_message(
-                json.dumps({"command": "DISCONNECT"}))
+                    "/pair/"+name, json.dumps({"command": "DISCONNECT"}))
             del(pairs[p_key])
 
     def __on_subscribe(self, dest_type, dest_name):
@@ -99,13 +109,13 @@ class SinsHandler(WebSocketHandler):
                         msg = queue.messages.get_nowait()
                     except Queue.Empty:
                         break
-                    self.write_message(msg)
+                    session.write_message("/queue/"+dest_name, msg)
         elif dest_type == 'pair':
             try:
                 pair = pairs[dest_name]
                 side = "a"
             except:
-                pairs[dest_name] = SPair()
+                pairs[dest_name] = SPair(dest_name)
                 pair = pairs[dest_name]
                 side = "b"
 
@@ -123,7 +133,7 @@ class SinsHandler(WebSocketHandler):
                         msg = side.messages.get_nowait()
                     except Queue.Empty:
                         break
-                    self.write_message(msg)
+                    session.write_message("/pair/"+dest_name, msg)
         else:
             print "Unknown destination type "+dest_type +"."
 
@@ -162,10 +172,10 @@ class SinsHandler(WebSocketHandler):
 
             if pair.a_side.key == self.key:
                 sessions[pair.b_side.key].write_message(
-                    json.dumps({"command": "DISCONNECT"}))
+                    "/pair/"+pair.name, json.dumps({"command": "DISCONNECT"}))
             elif pair.a_side.key == self.key:
                 sessions[pair.a_side.key].write_message(
-                    json.dumps({"command": "DISCONNECT"}))
+                    "/pair/"+pair.name, json.dumps({"command": "DISCONNECT"}))
             else:
                 print "Unsubscribe from party not subscribed."
                 return
@@ -181,13 +191,13 @@ class SinsHandler(WebSocketHandler):
         if dest_type == 'topic':
             for sname in sessions:
                 if dest_name in sessions[sname].topics:
-                    sessions[sname].write_message(content)
+                    sessions[sname].write_message("/topic/"+dest_name, content)
 
         elif dest_type == 'queue':
             queue = self.__prepare_queue(dest_name)
             if len(queues[dest_name].listeners) > 0:
                 current = queue.cycle.next()
-                sessions[current].write_message(content)
+                sessions[current].write_message("/queue/"+dest_name, content)
                 queue.current = current
             else:
                 queue.messages.put_nowait(content)
@@ -212,7 +222,7 @@ class SinsHandler(WebSocketHandler):
                 return
 
             if side.key is not None:
-                sessions[side.key].write_message(content)
+                sessions[side.key].write_message("/pair/"+dest_name,content)
             else:
                 side.messages.put_nowait(content)
                 
